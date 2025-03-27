@@ -3,7 +3,6 @@ venv/
 
 # Ignore specific files
 last_processed.txt
-posters.json
 posters_link_fetch.py
 
 # Ignore system-specific files (optional)
