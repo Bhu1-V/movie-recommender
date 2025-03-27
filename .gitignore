@@ -1,0 +1,12 @@
+# Ignore virtual environment
+venv/
+
+# Ignore specific files
+last_processed.txt
+posters.json
+posters_link_fetch.py
+
+# Ignore system-specific files (optional)
+*.log
+.DS_Store
+Thumbs.db
