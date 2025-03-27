@@ -29,7 +29,8 @@ def load_data():
     ratings['movieId'] = ratings['movieId'].astype(int)
     movies['movieId'] = movies['movieId'].astype(int)
     links['movieId'] = links['movieId'].astype(int)
-    movies['genres'] = movies['genres'].apply(lambda x: x.split('|'))
+    # Keep genres as strings (do not split here)
+    # Removed: movies['genres'] = movies['genres'].apply(lambda x: x.split('|'))
     # Compute movie stats
     movie_stats = ratings.groupby('movieId').agg({'rating': ['mean', 'count']})
     movie_stats.columns = ['avg_rating', 'num_ratings']
@@ -77,8 +78,10 @@ model, trainset = train_collaborative_filtering_model(ratings)
 @st.cache_data
 def compute_similarity_matrix(movies):
     """Compute cosine similarity matrix based on movie genres."""
+    # Split genres inside the function
+    genres_list = movies['genres'].apply(lambda x: x.split('|'))
     mlb = MultiLabelBinarizer()
-    genre_matrix = mlb.fit_transform(movies['genres'])
+    genre_matrix = mlb.fit_transform(genres_list)
     return cosine_similarity(genre_matrix)
 
 similarity_matrix = compute_similarity_matrix(movies)
@@ -94,9 +97,10 @@ def get_content_based_recommendations(selected_titles, similarity_matrix, movies
     insights = []
     for idx in top_indices:
         title = movies.iloc[idx]['title']
-        genres = movies.iloc[idx]['genres']
-        selected_genres = set.union(*[set(movies.iloc[i]['genres']) for i in selected_indices])
-        overlapping_genres = set(genres).intersection(selected_genres)
+        genres_str = movies.iloc[idx]['genres']
+        genres_list = genres_str.split('|')
+        selected_genres = set.union(*[set(movies.iloc[i]['genres'].split('|')) for i in selected_indices])
+        overlapping_genres = set(genres_list).intersection(selected_genres)
         similarity_score = avg_similarity[idx]
         top_genres = list(overlapping_genres)[:3]
         insight = {
@@ -215,12 +219,12 @@ elif recommendation_type == "Collaborative Filtering":
                     overlap_pct = recommended_dict[movie_id]['overlap_pct']
                     avg_rating = movie_stats.loc[movie_id, 'avg_rating'] if movie_id in movie_stats.index else 'N/A'
                     num_ratings = movie_stats.loc[movie_id, 'num_ratings'] if movie_id in movie_stats.index else 'N/A'
-                    genres = movies[movies['movieId'] == movie_id]['genres'].values[0]
+                    genres_str = movies[movies['movieId'] == movie_id]['genres'].values[0]
                     rating_5_pct = rating_dist.loc[movie_id, 5.0] * 100 if movie_id in rating_dist.index and 5.0 in rating_dist.columns else 0
                     
                     st.write(f"- **Why Recommended**: Similar to '{similar_to}' with a similarity score of {sim_score:.2f} (0 to 1).")
                     st.write(f"- **User Overlap**: Liked by {overlap_pct:.1f}% of users who rated '{similar_to}'.")
-                    st.write(f"- **Genres**: {', '.join(genres)}")
+                    st.write(f"- **Genres**: {genres_str.replace('|', ', ')}")
                     st.write(f"- **Rating Details**: Avg {avg_rating:.2f} from {num_ratings} ratings; {rating_5_pct:.1f}% gave 5 stars" if avg_rating != 'N/A' else "- **Rating Details**: Not available")
                     st.markdown(f'<a href="{imdb_url}" target="_blank"><button style="background-color:#4CAF50;color:white;padding:5px 10px;border:none;border-radius:5px;cursor:pointer;">View on IMDb</button></a>', unsafe_allow_html=True)
         else:
