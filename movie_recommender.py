@@ -18,20 +18,32 @@ except json.JSONDecodeError:
     st.warning("**Warning**: posters.json is corrupted. Posters will not be displayed.")
 
 # Sidebar option for dataset size reduction
-reduce_dataset = st.sidebar.checkbox("Reduce dataset size (sample 10% of ratings)", value=False)
-sample_fraction = 0.1  # Change this value to control the sampling fraction
+reduce_dataset = st.sidebar.checkbox("Reduce dataset size (sample 10% of ratings)", value=True)  # Default to True for Streamlit Cloud
+sample_fraction = 0.1  # 10% sampling; adjust as needed (e.g., 0.05 for 5%)
 
 # --- Data Loading and Preprocessing ---
 @st.cache_data(show_spinner=False)
 def load_data(sample=False, fraction=0.1):
-    """Load and preprocess movie data from CSV files.
-    
+    """Load and preprocess movie data from CSV files with reduced memory usage.
+
     If `sample` is True, load a random subset of the ratings.
     """
     try:
-        ratings = pd.read_csv('ml-latest-small/ratings.csv')
-        movies = pd.read_csv('ml-latest-small/movies.csv')
-        links = pd.read_csv('ml-latest-small/links.csv')
+        # Load only necessary columns with efficient dtypes
+        ratings = pd.read_csv(
+            'ml-latest-small/ratings.csv',
+            usecols=['userId', 'movieId', 'rating'],
+            dtype={'userId': 'int32', 'movieId': 'int32', 'rating': 'float32'}
+        )
+        movies = pd.read_csv(
+            'ml-latest-small/movies.csv',
+            dtype={'movieId': 'int32'}
+        )
+        links = pd.read_csv(
+            'ml-latest-small/links.csv',
+            usecols=['movieId', 'imdbId'],
+            dtype={'movieId': 'int32', 'imdbId': 'int32'}
+        )
     except FileNotFoundError as e:
         st.error(f"**Error**: {e}. Please ensure CSV files are in the 'ml-latest-small' directory.")
         st.stop()
@@ -39,14 +51,10 @@ def load_data(sample=False, fraction=0.1):
         st.error(f"**Error**: Failed to parse CSV files. {e}")
         st.stop()
 
-    # Optionally reduce the dataset size by sampling ratings
+    # Optionally reduce dataset size by sampling ratings
     if sample:
         ratings = ratings.sample(frac=fraction, random_state=42).reset_index(drop=True)
-    
-    # Ensure movieId is integer
-    ratings['movieId'] = ratings['movieId'].astype(int)
-    movies['movieId'] = movies['movieId'].astype(int)
-    links['movieId'] = links['movieId'].astype(int)
+        st.info(f"Dataset reduced to {int(fraction * 100)}% of original size ({len(ratings)} ratings).")
 
     # Handle missing values
     if ratings[['userId', 'movieId', 'rating']].isnull().any().any():
@@ -117,11 +125,11 @@ except Exception as e:
 # --- Content-Based Filtering ---
 @st.cache_data(show_spinner=False)
 def compute_similarity_matrix(movies):
-    """Compute genre-based similarity matrix."""
+    """Compute genre-based similarity matrix with reduced memory usage."""
     genres_list = movies['genres'].apply(lambda x: x.split('|'))
     mlb = MultiLabelBinarizer()
     genre_matrix = mlb.fit_transform(genres_list)
-    sim_matrix = cosine_similarity(genre_matrix)
+    sim_matrix = cosine_similarity(genre_matrix).astype('float32')  # Use float32 to save memory
     return sim_matrix
 
 try:
@@ -150,7 +158,7 @@ def get_content_based_recommendations(selected_titles, similarity_matrix, movies
         top_genres = list(overlapping_genres)[:3]
         insight = {
             'overlapping_genres': list(overlapping_genres),
-            'similarity_score': similarity_score,
+            'similarity_score': float(similarity_score),  # Ensure JSON-serializable
             'top_genres': top_genres
         }
         insights.append((title, insight))
@@ -177,7 +185,7 @@ def get_recommendations(selected_ids, model, trainset, ratings, k=10):
                     overlap_pct = (overlap / total_users) * 100 if total_users > 0 else 0
                     recommended[raw_id] = {
                         'similar_to': id_to_title[movie_id],
-                        'sim_score': sim_score,
+                        'sim_score': float(sim_score),  # Ensure JSON-serializable
                         'overlap_pct': overlap_pct
                     }
                     if len(recommended) >= k:
