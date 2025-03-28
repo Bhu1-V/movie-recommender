@@ -16,15 +16,15 @@ except json.JSONDecodeError:
     poster_paths = {}
     st.warning("**Warning**: posters.json is corrupted. Posters will not be displayed.")
 
-# Sidebar option for dataset size reduction
-reduce_dataset = st.sidebar.checkbox("Reduce dataset size (sample 10% of ratings)", value=True)
-sample_fraction = 0.1  # 10% sampling
-
 # --- Data Loading and Preprocessing ---
 @st.cache_data(show_spinner=False)
-def load_data(sample=False, fraction=0.1):
-    """Load and preprocess movie data from CSV files with reduced memory usage."""
+def load_data():
+    """Load and preprocess movie data from CSV files with reduced memory usage.
+    
+    Always loads a random 10% subset of the ratings.
+    """
     try:
+        # Load only necessary columns with efficient dtypes
         ratings = pd.read_csv(
             'ml-latest-small/ratings.csv',
             usecols=['userId', 'movieId', 'rating'],
@@ -46,10 +46,11 @@ def load_data(sample=False, fraction=0.1):
         st.error(f"**Error**: Failed to parse CSV files. {e}")
         st.stop()
 
-    if sample:
-        ratings = ratings.sample(frac=fraction, random_state=42).reset_index(drop=True)
-        st.info(f"Dataset reduced to {int(fraction * 100)}% ({len(ratings)} ratings).")
+    # Always sample 10% of the ratings
+    ratings = ratings.sample(frac=0.1, random_state=42).reset_index(drop=True)
+    st.info(f"Using a 10% sample of the ratings dataset ({len(ratings)} ratings).")
 
+    # Handle missing values
     if ratings[['userId', 'movieId', 'rating']].isnull().any().any():
         st.warning("**Warning**: Missing values in ratings. Dropping affected rows.")
         ratings = ratings.dropna(subset=['userId', 'movieId', 'rating'])
@@ -60,7 +61,7 @@ def load_data(sample=False, fraction=0.1):
     return ratings, movies, links, movie_stats, rating_dist
 
 try:
-    ratings, movies, links, movie_stats, rating_dist = load_data(sample=reduce_dataset, fraction=sample_fraction)
+    ratings, movies, links, movie_stats, rating_dist = load_data()
 except Exception as e:
     st.error(f"**Error**: Failed to load data. {e}")
     st.stop()
@@ -77,18 +78,18 @@ def load_similarity_matrix():
 
 similarity_matrix = load_similarity_matrix()
 
-# --- Load Precomputed Collaborative Filtering Model ---
+# --- Load Precomputed SVD Model ---
 @st.cache_resource(show_spinner=False)
-def load_collaborative_filtering_model():
+def load_svd_model():
     try:
-        model = joblib.load('knn_model.joblib')
+        model = joblib.load('svd_model.joblib')
         trainset = joblib.load('trainset.joblib')
         return model, trainset
     except FileNotFoundError:
-        st.error("**Error**: Model or trainset files not found. Please upload them.")
+        st.error("**Error**: SVD model or trainset files not found. Please upload them.")
         return None, None
 
-model, trainset = load_collaborative_filtering_model()
+model, trainset = load_svd_model()
 
 # --- Popularity-Based Recommender ---
 @st.cache_data(show_spinner=False)
@@ -113,6 +114,7 @@ try:
 except Exception as e:
     st.error(f"**Error**: Failed to compute popularity-based recommendations. {e}")
     top_movies = pd.DataFrame()
+
 
 # --- Recommendation Functions ---
 def get_content_based_recommendations(selected_titles, similarity_matrix, movies, k=10):
@@ -141,36 +143,36 @@ def get_content_based_recommendations(selected_titles, similarity_matrix, movies
         insights.append((title, insight))
     return insights
 
-def get_recommendations(selected_ids, model, trainset, ratings, k=10):
-    """Get collaborative filtering recommendations."""
+# --- SVD Recommendation Function ---
+def get_recommendations(selected_ids, model, trainset, k=10):
+    """Get recommendations using SVD by simulating a pseudo-user who likes the selected movies."""
     if model is None or trainset is None:
-        st.error("**Error**: Collaborative filtering model unavailable.")
+        st.error("**Error**: SVD model unavailable.")
         return {}
+
+    # Create a pseudo-user ID (one greater than the max user ID in the trainset)
+    pseudo_user_id = max(trainset.all_users()) + 1
+
+    # Get all items (movies) in the trainset
+    all_items = set(trainset.all_items())
+
+    # Exclude the selected movies from the candidates
+    candidate_items = [item for item in all_items if trainset.to_raw_iid(item) not in selected_ids]
+
+    # Predict ratings for all candidate items for the pseudo-user
+    predictions = [model.predict(pseudo_user_id, trainset.to_raw_iid(item), r_ui=5.0 if trainset.to_raw_iid(item) in selected_ids else None)
+                   for item in candidate_items]
+
+    # Sort predictions by estimated rating and take top k
+    top_predictions = sorted(predictions, key=lambda x: x.est, reverse=True)[:k]
+
     recommended = {}
-    for movie_id in selected_ids:
-        try:
-            inner_id = trainset.to_inner_iid(movie_id)
-            neighbors = model.get_neighbors(inner_id, k=50)
-            for neighbor in neighbors:
-                raw_id = trainset.to_raw_iid(neighbor)
-                if raw_id not in selected_ids and raw_id not in recommended:
-                    sim_score = model.sim[inner_id, neighbor]
-                    selected_users = set(ratings[ratings['movieId'] == movie_id]['userId'])
-                    rec_users = set(ratings[ratings['movieId'] == raw_id]['userId'])
-                    overlap = len(selected_users.intersection(rec_users))
-                    total_users = len(selected_users)
-                    overlap_pct = (overlap / total_users) * 100 if total_users > 0 else 0
-                    recommended[raw_id] = {
-                        'similar_to': id_to_title[movie_id],
-                        'sim_score': float(sim_score),
-                        'overlap_pct': overlap_pct
-                    }
-                    if len(recommended) >= k:
-                        break
-            if len(recommended) >= k:
-                break
-        except ValueError:
-            continue
+    for pred in top_predictions:
+        raw_id = pred.iid
+        recommended[raw_id] = {
+            'predicted_rating': pred.est,
+            'similar_to': ', '.join([id_to_title[mid] for mid in selected_ids if mid in id_to_title])
+        }
     return recommended
 
 # Mappings between movie titles and IDs
@@ -182,13 +184,15 @@ st.title("Movie Recommender System")
 st.markdown("""
 Welcome to the Movie Recommender System! Choose a recommendation type from the sidebar:
 - **Popularity-based**: Top 10 movies based on weighted ratings.
-- **Collaborative Filtering**: Personalized recommendations based on user rating patterns.
+- **Collaborative Filtering (SVD)**: Personalized recommendations based on user rating patterns.
 - **Content-Based**: Recommendations based on genre similarities.
+
+**Note**: To optimize performance, this app uses a 10% sample of the MovieLens ratings dataset.
 """)
 
 recommendation_type = st.sidebar.selectbox(
     "Choose Recommendation Type",
-    ["Popularity-based", "Collaborative Filtering", "Content-Based"]
+    ["Popularity-based", "Collaborative Filtering (SVD)", "Content-Based"]
 )
 
 if recommendation_type == "Popularity-based":
@@ -207,7 +211,7 @@ if recommendation_type == "Popularity-based":
             with col1:
                 if movie_id_str in poster_paths:
                     try:
-                        st.image(poster_paths[movie_id_str].replace("/w500/", "/w200/"), width=100)
+                        st.image(poster_paths[movie_id_str], width=100)
                     except Exception:
                         st.write("Poster unavailable")
                 else:
@@ -215,10 +219,10 @@ if recommendation_type == "Popularity-based":
             with col2:
                 st.write(f"**{row['title']}** - Weighted Rating: {row['weighted_rating']:.2f}")
 
-elif recommendation_type == "Collaborative Filtering":
-    st.subheader("Personalized Recommendations (Collaborative Filtering)")
+elif recommendation_type == "Collaborative Filtering (SVD)":
+    st.subheader("Personalized Recommendations (SVD)")
     st.markdown("""
-    Based on user rating patterns. Insights include similarity scores, user overlap, genres, and ratings.
+    Based on user rating patterns. Insights include predicted ratings for a pseudo-user who likes the selected movies.
     """)
     movie_list = movies['title'].tolist()
     selected_movies = st.multiselect("Select Movies You Like", movie_list)
@@ -227,7 +231,7 @@ elif recommendation_type == "Collaborative Filtering":
         if not selected_ids:
             st.warning("**Warning**: Selected movies not found in dataset.")
         else:
-            recommended_dict = get_recommendations(selected_ids, model, trainset, ratings, k=10)
+            recommended_dict = get_recommendations(selected_ids, model, trainset, k=10)
             recommended_ids = list(recommended_dict.keys())
             recommended_titles = [id_to_title[mid] for mid in recommended_ids if mid in id_to_title]
             
@@ -245,7 +249,7 @@ elif recommendation_type == "Collaborative Filtering":
                     with col1:
                         if movie_id_str in poster_paths:
                             try:
-                                st.image(poster_paths[movie_id_str].replace("/w500/", "/w200/"), width=100)
+                                st.image(poster_paths[movie_id_str], width=100)
                             except Exception:
                                 st.write("Poster unavailable")
                         else:
@@ -253,16 +257,14 @@ elif recommendation_type == "Collaborative Filtering":
                     with col2:
                         st.write(f"**{title}**")
                         if movie_id in recommended_dict:
+                            predicted_rating = recommended_dict[movie_id]['predicted_rating']
                             similar_to = recommended_dict[movie_id]['similar_to']
-                            sim_score = recommended_dict[movie_id]['sim_score']
-                            overlap_pct = recommended_dict[movie_id]['overlap_pct']
                             avg_rating = movie_stats.loc[movie_id, 'avg_rating'] if movie_id in movie_stats.index else 'N/A'
                             num_ratings = movie_stats.loc[movie_id, 'num_ratings'] if movie_id in movie_stats.index else 'N/A'
                             genres_str = movies[movies['movieId'] == movie_id]['genres'].values[0]
                             rating_5_pct = rating_dist.loc[movie_id, 5.0] * 100 if movie_id in rating_dist.index and 5.0 in rating_dist.columns else 0
                             
-                            st.write(f"- **Why Recommended**: Similar to '{similar_to}' (Similarity: {sim_score:.2f}).")
-                            st.write(f"- **User Overlap**: {overlap_pct:.1f}% of users who liked '{similar_to}' also liked this.")
+                            st.write(f"- **Why Recommended**: Predicted rating {predicted_rating:.2f}/5 based on your liking for '{similar_to}'.")
                             st.write(f"- **Genres**: {genres_str.replace('|', ', ')}")
                             st.write(f"- **Rating**: Avg {avg_rating:.2f} ({num_ratings} ratings); {rating_5_pct:.1f}% 5 stars" if avg_rating != 'N/A' else "- **Rating**: N/A")
                             st.markdown(f'<a href="{imdb_url}" target="_blank"><button style="background-color:#4CAF50;color:white;padding:5px 10px;border:none;border-radius:5px;cursor:pointer;">View on IMDb</button></a>', unsafe_allow_html=True)
@@ -294,7 +296,7 @@ elif recommendation_type == "Content-Based":
                 with col1:
                     if movie_id_str in poster_paths:
                         try:
-                            st.image(poster_paths[movie_id_str].replace("/w500/", "/w200/"), width=100)
+                            st.image(poster_paths[movie_id_str], width=100)
                         except Exception:
                             st.write("Poster unavailable")
                         else:
