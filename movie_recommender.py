@@ -17,21 +17,32 @@ except json.JSONDecodeError:
     poster_paths = {}
     st.warning("**Warning**: posters.json is corrupted. Posters will not be displayed.")
 
+# Sidebar option for dataset size reduction
+reduce_dataset = st.sidebar.checkbox("Reduce dataset size (sample 10% of ratings)", value=False)
+sample_fraction = 0.1  # Change this value to control the sampling fraction
+
 # --- Data Loading and Preprocessing ---
-@st.cache(show_spinner=False, allow_output_mutation=True)
-def load_data():
-    """Load and preprocess movie data from CSV files."""
+@st.cache_data(show_spinner=False)
+def load_data(sample=False, fraction=0.1):
+    """Load and preprocess movie data from CSV files.
+    
+    If `sample` is True, load a random subset of the ratings.
+    """
     try:
         ratings = pd.read_csv('ml-latest-small/ratings.csv')
         movies = pd.read_csv('ml-latest-small/movies.csv')
         links = pd.read_csv('ml-latest-small/links.csv')
     except FileNotFoundError as e:
         st.error(f"**Error**: {e}. Please ensure CSV files are in the 'ml-latest-small' directory.")
-        raise
+        st.stop()
     except pd.errors.ParserError as e:
         st.error(f"**Error**: Failed to parse CSV files. {e}")
-        raise
+        st.stop()
 
+    # Optionally reduce the dataset size by sampling ratings
+    if sample:
+        ratings = ratings.sample(frac=fraction, random_state=42).reset_index(drop=True)
+    
     # Ensure movieId is integer
     ratings['movieId'] = ratings['movieId'].astype(int)
     movies['movieId'] = movies['movieId'].astype(int)
@@ -48,21 +59,21 @@ def load_data():
     return ratings, movies, links, movie_stats, rating_dist
 
 try:
-    ratings, movies, links, movie_stats, rating_dist = load_data()
+    ratings, movies, links, movie_stats, rating_dist = load_data(sample=reduce_dataset, fraction=sample_fraction)
 except Exception as e:
     st.error(f"**Error**: Failed to load data. {e}")
     st.stop()
 
 # --- Popularity-Based Recommender ---
-@st.cache(show_spinner=False, allow_output_mutation=True)
+@st.cache_data(show_spinner=False)
 def compute_popularity_based_recommendations(ratings, movies):
     """Compute top 10 movies based on weighted ratings."""
     C = ratings['rating'].mean()
     num_ratings = ratings.groupby('movieId').size()
     m = num_ratings.quantile(0.9)
-    movie_stats = ratings.groupby('movieId').agg({'rating': ['count', 'mean']})
-    movie_stats.columns = ['num_ratings', 'avg_rating']
-    qualified_movies = movie_stats[movie_stats['num_ratings'] >= m].copy()
+    movie_stats_local = ratings.groupby('movieId').agg({'rating': ['count', 'mean']})
+    movie_stats_local.columns = ['num_ratings', 'avg_rating']
+    qualified_movies = movie_stats_local[movie_stats_local['num_ratings'] >= m].copy()
     qualified_movies['weighted_rating'] = (
         (qualified_movies['num_ratings'] / (qualified_movies['num_ratings'] + m)) * qualified_movies['avg_rating'] +
         (m / (qualified_movies['num_ratings'] + m)) * C
@@ -78,7 +89,7 @@ except Exception as e:
     top_movies = pd.DataFrame()
 
 # --- Collaborative Filtering Recommender ---
-@st.cache(allow_output_mutation=True, show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def train_collaborative_filtering_model(ratings):
     """Train a KNN-based collaborative filtering model."""
     reader = Reader(rating_scale=(0.5, 5.0))
@@ -104,7 +115,7 @@ except Exception as e:
     model, trainset = None, None
 
 # --- Content-Based Filtering ---
-@st.cache(show_spinner=False, allow_output_mutation=True)
+@st.cache_data(show_spinner=False)
 def compute_similarity_matrix(movies):
     """Compute genre-based similarity matrix."""
     genres_list = movies['genres'].apply(lambda x: x.split('|'))
