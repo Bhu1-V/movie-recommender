@@ -49,36 +49,36 @@ print("Debug: Calling load_data")
 ratings, movies, links, movie_stats, rating_dist = load_data()
 print("Debug: load_data completed successfully")
 
-# # --- Popularity-Based Recommender ---
-# @st.cache_data
-# def compute_popularity_based_recommendations(ratings, movies):
-#     print("Debug: Inside compute_popularity_based_recommendations")
-#     print("Debug: Calculating global mean rating")
-#     C = ratings['rating'].mean()
-#     print("Debug: Computing number of ratings per movie")
-#     num_ratings = ratings.groupby('movieId').size()
-#     print("Debug: Calculating 90th percentile for minimum ratings")
-#     m = num_ratings.quantile(0.9)
-#     print("Debug: Aggregating movie stats")
-#     movie_stats = ratings.groupby('movieId').agg({'rating': ['count', 'mean']})
-#     movie_stats.columns = ['num_ratings', 'avg_rating']
-#     print("Debug: Filtering qualified movies")
-#     qualified_movies = movie_stats[movie_stats['num_ratings'] >= m].copy()
-#     print("Debug: Computing weighted ratings")
-#     qualified_movies['weighted_rating'] = (
-#         (qualified_movies['num_ratings'] / (qualified_movies['num_ratings'] + m)) * qualified_movies['avg_rating'] +
-#         (m / (qualified_movies['num_ratings'] + m)) * C
-#     )
-#     print("Debug: Sorting top movies")
-#     top_movies = qualified_movies.sort_values('weighted_rating', ascending=False).head(10)
-#     print("Debug: Merging with movie titles")
-#     top_movies = top_movies.merge(movies[['movieId', 'title']], on='movieId', how='left')
-#     print("Debug: Returning top movies")
-#     return top_movies
+# --- Popularity-Based Recommender ---
+@st.cache_data
+def compute_popularity_based_recommendations(ratings, movies):
+    print("Debug: Inside compute_popularity_based_recommendations")
+    print("Debug: Calculating global mean rating")
+    C = ratings['rating'].mean()
+    print("Debug: Computing number of ratings per movie")
+    num_ratings = ratings.groupby('movieId').size()
+    print("Debug: Calculating 90th percentile for minimum ratings")
+    m = num_ratings.quantile(0.9)
+    print("Debug: Aggregating movie stats")
+    movie_stats = ratings.groupby('movieId').agg({'rating': ['count', 'mean']})
+    movie_stats.columns = ['num_ratings', 'avg_rating']
+    print("Debug: Filtering qualified movies")
+    qualified_movies = movie_stats[movie_stats['num_ratings'] >= m].copy()
+    print("Debug: Computing weighted ratings")
+    qualified_movies['weighted_rating'] = (
+        (qualified_movies['num_ratings'] / (qualified_movies['num_ratings'] + m)) * qualified_movies['avg_rating'] +
+        (m / (qualified_movies['num_ratings'] + m)) * C
+    )
+    print("Debug: Sorting top movies")
+    top_movies = qualified_movies.sort_values('weighted_rating', ascending=False).head(10)
+    print("Debug: Merging with movie titles")
+    top_movies = top_movies.merge(movies[['movieId', 'title']], on='movieId', how='left')
+    print("Debug: Returning top movies")
+    return top_movies
 
-# print("Debug: Calling compute_popularity_based_recommendations")
-# top_movies = compute_popularity_based_recommendations(ratings, movies)
-# print("Debug: compute_popularity_based_recommendations completed")
+print("Debug: Calling compute_popularity_based_recommendations")
+top_movies = compute_popularity_based_recommendations(ratings, movies)
+print("Debug: compute_popularity_based_recommendations completed")
 
 # # --- Collaborative Filtering Recommender ---
 # @st.cache_data
