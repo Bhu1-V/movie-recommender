@@ -18,7 +18,7 @@ except json.JSONDecodeError:
     st.warning("**Warning**: posters.json is corrupted. Posters will not be displayed.")
 
 # --- Data Loading and Preprocessing ---
-@st.cache_data
+@st.cache(show_spinner=False, allow_output_mutation=True)
 def load_data():
     """Load and preprocess movie data from CSV files."""
     try:
@@ -26,7 +26,7 @@ def load_data():
         movies = pd.read_csv('ml-latest-small/movies.csv')
         links = pd.read_csv('ml-latest-small/links.csv')
     except FileNotFoundError as e:
-        st.error(f"**Error**: {e}. Please ensure CSV files are in 'ml-latest-small' directory.")
+        st.error(f"**Error**: {e}. Please ensure CSV files are in the 'ml-latest-small' directory.")
         raise
     except pd.errors.ParserError as e:
         st.error(f"**Error**: Failed to parse CSV files. {e}")
@@ -54,7 +54,7 @@ except Exception as e:
     st.stop()
 
 # --- Popularity-Based Recommender ---
-@st.cache_data
+@st.cache(show_spinner=False, allow_output_mutation=True)
 def compute_popularity_based_recommendations(ratings, movies):
     """Compute top 10 movies based on weighted ratings."""
     C = ratings['rating'].mean()
@@ -78,7 +78,7 @@ except Exception as e:
     top_movies = pd.DataFrame()
 
 # --- Collaborative Filtering Recommender ---
-@st.cache_resource
+@st.cache(allow_output_mutation=True, show_spinner=False)
 def train_collaborative_filtering_model(ratings):
     """Train a KNN-based collaborative filtering model."""
     reader = Reader(rating_scale=(0.5, 5.0))
@@ -104,7 +104,7 @@ except Exception as e:
     model, trainset = None, None
 
 # --- Content-Based Filtering ---
-@st.cache_data
+@st.cache(show_spinner=False, allow_output_mutation=True)
 def compute_similarity_matrix(movies):
     """Compute genre-based similarity matrix."""
     genres_list = movies['genres'].apply(lambda x: x.split('|'))
