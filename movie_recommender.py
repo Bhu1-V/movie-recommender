@@ -23,176 +23,176 @@ except json.JSONDecodeError:
     st.error("**Error**: posters.json is corrupted. Please check the file format.")
     print("Debug: posters.json corrupted, using empty dict")
 
-# # --- Data Loading and Preprocessing ---
-# @st.cache_data
-# def load_data():
-#     print("Debug: Inside load_data function")
-#     print("Debug: Loading ratings.csv")
-#     ratings = pd.read_csv('ml-latest-small/ratings.csv')
-#     print("Debug: Loading movies.csv")
-#     movies = pd.read_csv('ml-latest-small/movies.csv')
-#     print("Debug: Loading links.csv")
-#     links = pd.read_csv('ml-latest-small/links.csv')
-#     print("Debug: Converting movieId columns to int")
-#     ratings['movieId'] = ratings['movieId'].astype(int)
-#     movies['movieId'] = movies['movieId'].astype(int)
-#     links['movieId'] = links['movieId'].astype(int)
-#     print("Debug: Computing movie stats")
-#     movie_stats = ratings.groupby('movieId').agg({'rating': ['mean', 'count']})
-#     movie_stats.columns = ['avg_rating', 'num_ratings']
-#     print("Debug: Computing rating distribution")
-#     rating_dist = ratings.groupby('movieId')['rating'].value_counts(normalize=True).unstack(fill_value=0)
-#     print("Debug: Returning data from load_data")
-#     return ratings, movies, links, movie_stats, rating_dist
+# --- Data Loading and Preprocessing ---
+@st.cache_data
+def load_data():
+    print("Debug: Inside load_data function")
+    print("Debug: Loading ratings.csv")
+    ratings = pd.read_csv('ml-latest-small/ratings.csv')
+    print("Debug: Loading movies.csv")
+    movies = pd.read_csv('ml-latest-small/movies.csv')
+    print("Debug: Loading links.csv")
+    links = pd.read_csv('ml-latest-small/links.csv')
+    print("Debug: Converting movieId columns to int")
+    ratings['movieId'] = ratings['movieId'].astype(int)
+    movies['movieId'] = movies['movieId'].astype(int)
+    links['movieId'] = links['movieId'].astype(int)
+    print("Debug: Computing movie stats")
+    movie_stats = ratings.groupby('movieId').agg({'rating': ['mean', 'count']})
+    movie_stats.columns = ['avg_rating', 'num_ratings']
+    print("Debug: Computing rating distribution")
+    rating_dist = ratings.groupby('movieId')['rating'].value_counts(normalize=True).unstack(fill_value=0)
+    print("Debug: Returning data from load_data")
+    return ratings, movies, links, movie_stats, rating_dist
 
-# print("Debug: Calling load_data")
-# ratings, movies, links, movie_stats, rating_dist = load_data()
-# print("Debug: load_data completed successfully")
+print("Debug: Calling load_data")
+ratings, movies, links, movie_stats, rating_dist = load_data()
+print("Debug: load_data completed successfully")
 
-# # --- Popularity-Based Recommender ---
-# @st.cache_data
-# def compute_popularity_based_recommendations(ratings, movies):
-#     print("Debug: Inside compute_popularity_based_recommendations")
-#     print("Debug: Calculating global mean rating")
-#     C = ratings['rating'].mean()
-#     print("Debug: Computing number of ratings per movie")
-#     num_ratings = ratings.groupby('movieId').size()
-#     print("Debug: Calculating 90th percentile for minimum ratings")
-#     m = num_ratings.quantile(0.9)
-#     print("Debug: Aggregating movie stats")
-#     movie_stats = ratings.groupby('movieId').agg({'rating': ['count', 'mean']})
-#     movie_stats.columns = ['num_ratings', 'avg_rating']
-#     print("Debug: Filtering qualified movies")
-#     qualified_movies = movie_stats[movie_stats['num_ratings'] >= m].copy()
-#     print("Debug: Computing weighted ratings")
-#     qualified_movies['weighted_rating'] = (
-#         (qualified_movies['num_ratings'] / (qualified_movies['num_ratings'] + m)) * qualified_movies['avg_rating'] +
-#         (m / (qualified_movies['num_ratings'] + m)) * C
-#     )
-#     print("Debug: Sorting top movies")
-#     top_movies = qualified_movies.sort_values('weighted_rating', ascending=False).head(10)
-#     print("Debug: Merging with movie titles")
-#     top_movies = top_movies.merge(movies[['movieId', 'title']], on='movieId', how='left')
-#     print("Debug: Returning top movies")
-#     return top_movies
+# --- Popularity-Based Recommender ---
+@st.cache_data
+def compute_popularity_based_recommendations(ratings, movies):
+    print("Debug: Inside compute_popularity_based_recommendations")
+    print("Debug: Calculating global mean rating")
+    C = ratings['rating'].mean()
+    print("Debug: Computing number of ratings per movie")
+    num_ratings = ratings.groupby('movieId').size()
+    print("Debug: Calculating 90th percentile for minimum ratings")
+    m = num_ratings.quantile(0.9)
+    print("Debug: Aggregating movie stats")
+    movie_stats = ratings.groupby('movieId').agg({'rating': ['count', 'mean']})
+    movie_stats.columns = ['num_ratings', 'avg_rating']
+    print("Debug: Filtering qualified movies")
+    qualified_movies = movie_stats[movie_stats['num_ratings'] >= m].copy()
+    print("Debug: Computing weighted ratings")
+    qualified_movies['weighted_rating'] = (
+        (qualified_movies['num_ratings'] / (qualified_movies['num_ratings'] + m)) * qualified_movies['avg_rating'] +
+        (m / (qualified_movies['num_ratings'] + m)) * C
+    )
+    print("Debug: Sorting top movies")
+    top_movies = qualified_movies.sort_values('weighted_rating', ascending=False).head(10)
+    print("Debug: Merging with movie titles")
+    top_movies = top_movies.merge(movies[['movieId', 'title']], on='movieId', how='left')
+    print("Debug: Returning top movies")
+    return top_movies
 
-# print("Debug: Calling compute_popularity_based_recommendations")
-# top_movies = compute_popularity_based_recommendations(ratings, movies)
-# print("Debug: compute_popularity_based_recommendations completed")
+print("Debug: Calling compute_popularity_based_recommendations")
+top_movies = compute_popularity_based_recommendations(ratings, movies)
+print("Debug: compute_popularity_based_recommendations completed")
 
-# # --- Collaborative Filtering Recommender ---
-# @st.cache_data
-# def train_collaborative_filtering_model(ratings):
-#     print("Debug: Inside train_collaborative_filtering_model")
-#     print("Debug: Setting up Reader")
-#     reader = Reader(rating_scale=(0.5, 5.0))
-#     print("Debug: Loading data into surprise Dataset")
-#     data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
-#     print("Debug: Building trainset")
-#     trainset = data.build_full_trainset()
-#     print("Debug: Configuring similarity options")
-#     sim_options = {'name': 'cosine', 'user_based': False}
-#     print("Debug: Initializing KNNBasic model")
-#     model = KNNBasic(sim_options=sim_options)
-#     print("Debug: Training model")
-#     model.fit(trainset)
-#     print("Debug: Returning trained model and trainset")
-#     return model, trainset
+# --- Collaborative Filtering Recommender ---
+@st.cache_data
+def train_collaborative_filtering_model(ratings):
+    print("Debug: Inside train_collaborative_filtering_model")
+    print("Debug: Setting up Reader")
+    reader = Reader(rating_scale=(0.5, 5.0))
+    print("Debug: Loading data into surprise Dataset")
+    data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
+    print("Debug: Building trainset")
+    trainset = data.build_full_trainset()
+    print("Debug: Configuring similarity options")
+    sim_options = {'name': 'cosine', 'user_based': False}
+    print("Debug: Initializing KNNBasic model")
+    model = KNNBasic(sim_options=sim_options)
+    print("Debug: Training model")
+    model.fit(trainset)
+    print("Debug: Returning trained model and trainset")
+    return model, trainset
 
-# print("Debug: Calling train_collaborative_filtering_model")
-# model, trainset = train_collaborative_filtering_model(ratings)
-# print("Debug: train_collaborative_filtering_model completed")
+print("Debug: Calling train_collaborative_filtering_model")
+model, trainset = train_collaborative_filtering_model(ratings)
+print("Debug: train_collaborative_filtering_model completed")
 
-# # --- Content-Based Filtering ---
-# @st.cache_data
-# def compute_similarity_matrix(movies):
-#     print("Debug: Inside compute_similarity_matrix")
-#     print("Debug: Splitting genres into lists")
-#     genres_list = movies['genres'].apply(lambda x: x.split('|'))
-#     print("Debug: Initializing MultiLabelBinarizer")
-#     mlb = MultiLabelBinarizer()
-#     print("Debug: Transforming genres into matrix")
-#     genre_matrix = mlb.fit_transform(genres_list)
-#     print("Debug: Computing cosine similarity")
-#     sim_matrix = cosine_similarity(genre_matrix)
-#     print("Debug: Returning similarity matrix")
-#     return sim_matrix
+# --- Content-Based Filtering ---
+@st.cache_data
+def compute_similarity_matrix(movies):
+    print("Debug: Inside compute_similarity_matrix")
+    print("Debug: Splitting genres into lists")
+    genres_list = movies['genres'].apply(lambda x: x.split('|'))
+    print("Debug: Initializing MultiLabelBinarizer")
+    mlb = MultiLabelBinarizer()
+    print("Debug: Transforming genres into matrix")
+    genre_matrix = mlb.fit_transform(genres_list)
+    print("Debug: Computing cosine similarity")
+    sim_matrix = cosine_similarity(genre_matrix)
+    print("Debug: Returning similarity matrix")
+    return sim_matrix
 
-# print("Debug: Calling compute_similarity_matrix")
-# similarity_matrix = compute_similarity_matrix(movies)
-# print("Debug: compute_similarity_matrix completed")
+print("Debug: Calling compute_similarity_matrix")
+similarity_matrix = compute_similarity_matrix(movies)
+print("Debug: compute_similarity_matrix completed")
 
-# def get_content_based_recommendations(selected_titles, similarity_matrix, movies, k=10):
-#     print("Debug: Inside get_content_based_recommendations")
-#     print("Debug: Finding indices for selected titles")
-#     selected_indices = [movies[movies['title'] == title].index[0] for title in selected_titles if title in movies['title'].values]
-#     if not selected_indices:
-#         print("Debug: No valid titles selected, returning empty list")
-#         return []
-#     print("Debug: Computing average similarity")
-#     avg_similarity = np.mean(similarity_matrix[selected_indices], axis=0)
-#     print("Debug: Zeroing out selected movies")
-#     avg_similarity[selected_indices] = 0
-#     print("Debug: Sorting top similar movies")
-#     top_indices = np.argsort(avg_similarity)[::-1][:k]
-#     insights = []
-#     print("Debug: Generating insights for recommendations")
-#     for idx in top_indices:
-#         title = movies.iloc[idx]['title']
-#         genres_str = movies.iloc[idx]['genres']
-#         genres_list = genres_str.split('|')
-#         selected_genres = set.union(*[set(movies.iloc[i]['genres'].split('|')) for i in selected_indices])
-#         overlapping_genres = set(genres_list).intersection(selected_genres)
-#         similarity_score = avg_similarity[idx]
-#         top_genres = list(overlapping_genres)[:3]
-#         insight = {
-#             'overlapping_genres': list(overlapping_genres),
-#             'similarity_score': similarity_score,
-#             'top_genres': top_genres
-#         }
-#         insights.append((title, insight))
-#     print("Debug: Returning content-based recommendations")
-#     return insights
+def get_content_based_recommendations(selected_titles, similarity_matrix, movies, k=10):
+    print("Debug: Inside get_content_based_recommendations")
+    print("Debug: Finding indices for selected titles")
+    selected_indices = [movies[movies['title'] == title].index[0] for title in selected_titles if title in movies['title'].values]
+    if not selected_indices:
+        print("Debug: No valid titles selected, returning empty list")
+        return []
+    print("Debug: Computing average similarity")
+    avg_similarity = np.mean(similarity_matrix[selected_indices], axis=0)
+    print("Debug: Zeroing out selected movies")
+    avg_similarity[selected_indices] = 0
+    print("Debug: Sorting top similar movies")
+    top_indices = np.argsort(avg_similarity)[::-1][:k]
+    insights = []
+    print("Debug: Generating insights for recommendations")
+    for idx in top_indices:
+        title = movies.iloc[idx]['title']
+        genres_str = movies.iloc[idx]['genres']
+        genres_list = genres_str.split('|')
+        selected_genres = set.union(*[set(movies.iloc[i]['genres'].split('|')) for i in selected_indices])
+        overlapping_genres = set(genres_list).intersection(selected_genres)
+        similarity_score = avg_similarity[idx]
+        top_genres = list(overlapping_genres)[:3]
+        insight = {
+            'overlapping_genres': list(overlapping_genres),
+            'similarity_score': similarity_score,
+            'top_genres': top_genres
+        }
+        insights.append((title, insight))
+    print("Debug: Returning content-based recommendations")
+    return insights
 
-# # Function for collaborative filtering with detailed insights
-# def get_recommendations(selected_ids, model, trainset, ratings, k=10):
-#     print("Debug: Inside get_recommendations")
-#     recommended = {}
-#     for movie_id in selected_ids:
-#         print(f"Debug: Processing movie_id {movie_id}")
-#         try:
-#             inner_id = trainset.to_inner_iid(movie_id)
-#             print(f"Debug: Getting neighbors for inner_id {inner_id}")
-#             neighbors = model.get_neighbors(inner_id, k=50)
-#             for neighbor in neighbors:
-#                 raw_id = trainset.to_raw_iid(neighbor)
-#                 if raw_id not in selected_ids and raw_id not in recommended:
-#                     sim_score = model.sim[inner_id, neighbor]
-#                     selected_users = set(ratings[ratings['movieId'] == movie_id]['userId'])
-#                     rec_users = set(ratings[ratings['movieId'] == raw_id]['userId'])
-#                     overlap = len(selected_users.intersection(rec_users))
-#                     total_users = len(selected_users)
-#                     overlap_pct = (overlap / total_users) * 100 if total_users > 0 else 0
-#                     recommended[raw_id] = {
-#                         'similar_to': id_to_title[movie_id],
-#                         'sim_score': sim_score,
-#                         'overlap_pct': overlap_pct
-#                     }
-#                     if len(recommended) >= k:
-#                         break
-#             if len(recommended) >= k:
-#                 break
-#         except ValueError:
-#             print(f"Debug: ValueError for movie_id {movie_id}, skipping")
-#             continue
-#     print("Debug: Returning collaborative filtering recommendations")
-#     return recommended
+# Function for collaborative filtering with detailed insights
+def get_recommendations(selected_ids, model, trainset, ratings, k=10):
+    print("Debug: Inside get_recommendations")
+    recommended = {}
+    for movie_id in selected_ids:
+        print(f"Debug: Processing movie_id {movie_id}")
+        try:
+            inner_id = trainset.to_inner_iid(movie_id)
+            print(f"Debug: Getting neighbors for inner_id {inner_id}")
+            neighbors = model.get_neighbors(inner_id, k=50)
+            for neighbor in neighbors:
+                raw_id = trainset.to_raw_iid(neighbor)
+                if raw_id not in selected_ids and raw_id not in recommended:
+                    sim_score = model.sim[inner_id, neighbor]
+                    selected_users = set(ratings[ratings['movieId'] == movie_id]['userId'])
+                    rec_users = set(ratings[ratings['movieId'] == raw_id]['userId'])
+                    overlap = len(selected_users.intersection(rec_users))
+                    total_users = len(selected_users)
+                    overlap_pct = (overlap / total_users) * 100 if total_users > 0 else 0
+                    recommended[raw_id] = {
+                        'similar_to': id_to_title[movie_id],
+                        'sim_score': sim_score,
+                        'overlap_pct': overlap_pct
+                    }
+                    if len(recommended) >= k:
+                        break
+            if len(recommended) >= k:
+                break
+        except ValueError:
+            print(f"Debug: ValueError for movie_id {movie_id}, skipping")
+            continue
+    print("Debug: Returning collaborative filtering recommendations")
+    return recommended
 
-# # Create mappings between movie titles and IDs
-# print("Debug: Creating title-to-ID mappings")
-# title_to_id = dict(zip(movies['title'], movies['movieId']))
-# id_to_title = dict(zip(movies['movieId'], movies['title']))
-# print("Debug: Mappings created successfully")
+# Create mappings between movie titles and IDs
+print("Debug: Creating title-to-ID mappings")
+title_to_id = dict(zip(movies['title'], movies['movieId']))
+id_to_title = dict(zip(movies['movieId'], movies['title']))
+print("Debug: Mappings created successfully")
 
 # # --- Streamlit Web App ---
 # print("Debug: Setting up main UI")
