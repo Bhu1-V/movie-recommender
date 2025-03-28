@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
-from surprise import Dataset, Reader, KNNBasic
-from sklearn.preprocessing import MultiLabelBinarizer
-from sklearn.metrics.pairwise import cosine_similarity
+import scipy.sparse
+import joblib
 import json
 
 # --- Load Poster Paths with Error Handling ---
@@ -18,18 +17,14 @@ except json.JSONDecodeError:
     st.warning("**Warning**: posters.json is corrupted. Posters will not be displayed.")
 
 # Sidebar option for dataset size reduction
-reduce_dataset = st.sidebar.checkbox("Reduce dataset size (sample 10% of ratings)", value=True)  # Default to True for Streamlit Cloud
-sample_fraction = 0.1  # 10% sampling; adjust as needed (e.g., 0.05 for 5%)
+reduce_dataset = st.sidebar.checkbox("Reduce dataset size (sample 10% of ratings)", value=True)
+sample_fraction = 0.1  # 10% sampling
 
 # --- Data Loading and Preprocessing ---
 @st.cache_data(show_spinner=False)
 def load_data(sample=False, fraction=0.1):
-    """Load and preprocess movie data from CSV files with reduced memory usage.
-
-    If `sample` is True, load a random subset of the ratings.
-    """
+    """Load and preprocess movie data from CSV files with reduced memory usage."""
     try:
-        # Load only necessary columns with efficient dtypes
         ratings = pd.read_csv(
             'ml-latest-small/ratings.csv',
             usecols=['userId', 'movieId', 'rating'],
@@ -45,20 +40,18 @@ def load_data(sample=False, fraction=0.1):
             dtype={'movieId': 'int32', 'imdbId': 'int32'}
         )
     except FileNotFoundError as e:
-        st.error(f"**Error**: {e}. Please ensure CSV files are in the 'ml-latest-small' directory.")
+        st.error(f"**Error**: {e}. Please ensure CSV files are in 'ml-latest-small'.")
         st.stop()
     except pd.errors.ParserError as e:
         st.error(f"**Error**: Failed to parse CSV files. {e}")
         st.stop()
 
-    # Optionally reduce dataset size by sampling ratings
     if sample:
         ratings = ratings.sample(frac=fraction, random_state=42).reset_index(drop=True)
-        st.info(f"Dataset reduced to {int(fraction * 100)}% of original size ({len(ratings)} ratings).")
+        st.info(f"Dataset reduced to {int(fraction * 100)}% ({len(ratings)} ratings).")
 
-    # Handle missing values
     if ratings[['userId', 'movieId', 'rating']].isnull().any().any():
-        st.warning("**Warning**: Missing values in ratings data. Dropping affected rows.")
+        st.warning("**Warning**: Missing values in ratings. Dropping affected rows.")
         ratings = ratings.dropna(subset=['userId', 'movieId', 'rating'])
 
     movie_stats = ratings.groupby('movieId').agg({'rating': ['mean', 'count']})
@@ -71,6 +64,31 @@ try:
 except Exception as e:
     st.error(f"**Error**: Failed to load data. {e}")
     st.stop()
+
+# --- Load Precomputed Similarity Matrix ---
+@st.cache_data(show_spinner=False)
+def load_similarity_matrix():
+    try:
+        sim_matrix_sparse = scipy.sparse.load_npz('similarity_matrix.npz')
+        return sim_matrix_sparse.toarray()
+    except FileNotFoundError:
+        st.error("**Error**: similarity_matrix.npz not found. Please upload it.")
+        return np.array([])
+
+similarity_matrix = load_similarity_matrix()
+
+# --- Load Precomputed Collaborative Filtering Model ---
+@st.cache_resource(show_spinner=False)
+def load_collaborative_filtering_model():
+    try:
+        model = joblib.load('knn_model.joblib')
+        trainset = joblib.load('trainset.joblib')
+        return model, trainset
+    except FileNotFoundError:
+        st.error("**Error**: Model or trainset files not found. Please upload them.")
+        return None, None
+
+model, trainset = load_collaborative_filtering_model()
 
 # --- Popularity-Based Recommender ---
 @st.cache_data(show_spinner=False)
@@ -96,48 +114,7 @@ except Exception as e:
     st.error(f"**Error**: Failed to compute popularity-based recommendations. {e}")
     top_movies = pd.DataFrame()
 
-# --- Collaborative Filtering Recommender ---
-@st.cache_resource(show_spinner=False)
-def train_collaborative_filtering_model(ratings):
-    """Train a KNN-based collaborative filtering model."""
-    reader = Reader(rating_scale=(0.5, 5.0))
-    try:
-        data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
-        trainset = data.build_full_trainset()
-    except Exception as e:
-        st.error(f"**Error**: Failed to prepare data for training. {e}")
-        raise
-    sim_options = {'name': 'cosine', 'user_based': False}
-    model = KNNBasic(sim_options=sim_options)
-    try:
-        model.fit(trainset)
-    except Exception as e:
-        st.error(f"**Error**: Failed to train model. {e}")
-        raise
-    return model, trainset
-
-try:
-    model, trainset = train_collaborative_filtering_model(ratings)
-except Exception as e:
-    st.error(f"**Error**: Collaborative filtering model training failed. {e}")
-    model, trainset = None, None
-
-# --- Content-Based Filtering ---
-@st.cache_data(show_spinner=False)
-def compute_similarity_matrix(movies):
-    """Compute genre-based similarity matrix with reduced memory usage."""
-    genres_list = movies['genres'].apply(lambda x: x.split('|'))
-    mlb = MultiLabelBinarizer()
-    genre_matrix = mlb.fit_transform(genres_list)
-    sim_matrix = cosine_similarity(genre_matrix).astype('float32')  # Use float32 to save memory
-    return sim_matrix
-
-try:
-    similarity_matrix = compute_similarity_matrix(movies)
-except Exception as e:
-    st.error(f"**Error**: Failed to compute similarity matrix. {e}")
-    similarity_matrix = np.array([])
-
+# --- Recommendation Functions ---
 def get_content_based_recommendations(selected_titles, similarity_matrix, movies, k=10):
     """Get content-based recommendations based on genre similarity."""
     selected_indices = [movies[movies['title'] == title].index[0] for title in selected_titles if title in movies['title'].values]
@@ -158,7 +135,7 @@ def get_content_based_recommendations(selected_titles, similarity_matrix, movies
         top_genres = list(overlapping_genres)[:3]
         insight = {
             'overlapping_genres': list(overlapping_genres),
-            'similarity_score': float(similarity_score),  # Ensure JSON-serializable
+            'similarity_score': float(similarity_score),
             'top_genres': top_genres
         }
         insights.append((title, insight))
@@ -185,7 +162,7 @@ def get_recommendations(selected_ids, model, trainset, ratings, k=10):
                     overlap_pct = (overlap / total_users) * 100 if total_users > 0 else 0
                     recommended[raw_id] = {
                         'similar_to': id_to_title[movie_id],
-                        'sim_score': float(sim_score),  # Ensure JSON-serializable
+                        'sim_score': float(sim_score),
                         'overlap_pct': overlap_pct
                     }
                     if len(recommended) >= k:
@@ -230,7 +207,7 @@ if recommendation_type == "Popularity-based":
             with col1:
                 if movie_id_str in poster_paths:
                     try:
-                        st.image(poster_paths[movie_id_str], width=100)
+                        st.image(poster_paths[movie_id_str].replace("/w500/", "/w200/"), width=100)
                     except Exception:
                         st.write("Poster unavailable")
                 else:
@@ -268,7 +245,7 @@ elif recommendation_type == "Collaborative Filtering":
                     with col1:
                         if movie_id_str in poster_paths:
                             try:
-                                st.image(poster_paths[movie_id_str], width=100)
+                                st.image(poster_paths[movie_id_str].replace("/w500/", "/w200/"), width=100)
                             except Exception:
                                 st.write("Poster unavailable")
                         else:
@@ -317,11 +294,11 @@ elif recommendation_type == "Content-Based":
                 with col1:
                     if movie_id_str in poster_paths:
                         try:
-                            st.image(poster_paths[movie_id_str], width=100)
+                            st.image(poster_paths[movie_id_str].replace("/w500/", "/w200/"), width=100)
                         except Exception:
                             st.write("Poster unavailable")
-                    else:
-                        st.write("No poster")
+                        else:
+                            st.write("No poster")
                 with col2:
                     st.write(f"**{title}**")
                     overlapping_genres = ', '.join(insight['overlapping_genres'])
