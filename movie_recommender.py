@@ -80,28 +80,28 @@ print("Debug: Calling compute_popularity_based_recommendations")
 top_movies = compute_popularity_based_recommendations(ratings, movies)
 print("Debug: compute_popularity_based_recommendations completed")
 
-# # --- Collaborative Filtering Recommender ---
-# @st.cache_data
-# def train_collaborative_filtering_model(ratings):
-#     print("Debug: Inside train_collaborative_filtering_model")
-#     print("Debug: Setting up Reader")
-#     reader = Reader(rating_scale=(0.5, 5.0))
-#     print("Debug: Loading data into surprise Dataset")
-#     data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
-#     print("Debug: Building trainset")
-#     trainset = data.build_full_trainset()
-#     print("Debug: Configuring similarity options")
-#     sim_options = {'name': 'cosine', 'user_based': False}
-#     print("Debug: Initializing KNNBasic model")
-#     model = KNNBasic(sim_options=sim_options)
-#     print("Debug: Training model")
-#     model.fit(trainset)
-#     print("Debug: Returning trained model and trainset")
-#     return model, trainset
+# --- Collaborative Filtering Recommender ---
+@st.cache_data
+def train_collaborative_filtering_model(ratings):
+    print("Debug: Inside train_collaborative_filtering_model")
+    print("Debug: Setting up Reader")
+    reader = Reader(rating_scale=(0.5, 5.0))
+    print("Debug: Loading data into surprise Dataset")
+    data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
+    print("Debug: Building trainset")
+    trainset = data.build_full_trainset()
+    print("Debug: Configuring similarity options")
+    sim_options = {'name': 'cosine', 'user_based': False}
+    print("Debug: Initializing KNNBasic model")
+    model = KNNBasic(sim_options=sim_options)
+    print("Debug: Training model")
+    model.fit(trainset)
+    print("Debug: Returning trained model and trainset")
+    return model, trainset
 
-# print("Debug: Calling train_collaborative_filtering_model")
-# model, trainset = train_collaborative_filtering_model(ratings)
-# print("Debug: train_collaborative_filtering_model completed")
+print("Debug: Calling train_collaborative_filtering_model")
+model, trainset = train_collaborative_filtering_model(ratings)
+print("Debug: train_collaborative_filtering_model completed")
 
 # # --- Content-Based Filtering ---
 # @st.cache_data
